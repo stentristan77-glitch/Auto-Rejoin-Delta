@@ -28,7 +28,7 @@ class WatchdogService : Service() {
         private const val CHANNEL = "watchdog"
         private const val ACTION_STOP = "stop"
         private const val CHECK_MS = 2000L
-        private const val COOLDOWN_MS = 25_000L // give Roblox time to load after relaunch
+        private const val RETRY_MS = 90_000L // if the game didn't come back, try the link again after this
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -38,7 +38,9 @@ class WatchdogService : Service() {
     private var sawTargetOpen = false
     private var goneSince = 0L
     private var lastLaunch = 0L
+    private var waitingForRelaunch = false
     private var currentForeground: String? = null
+    private var currentClass: String? = null
     private var lastEventTime = 0L
 
     private val tick = object : Runnable {
@@ -85,26 +87,39 @@ class WatchdogService : Service() {
 
         if (fg == target) {
             sawTargetOpen = true
+            waitingForRelaunch = false
             goneSince = 0L
             return
         }
 
+        // Unknown foreground (e.g. mid screen switch) - don't count it as closed
+        if (fg == null) return
+
         // Don't fight the user while they're in this app (e.g. to press Stop)
         if (fg == packageName) { goneSince = 0L; return }
-
-        // Only relaunch after Roblox has actually been opened once
-        if (!sawTargetOpen) return
 
         // Skip while the screen is off
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         if (!pm.isInteractive) return
 
+        // Already reopened once: only retry if the game still hasn't come back after a while
+        if (waitingForRelaunch) {
+            if (now - lastLaunch >= RETRY_MS) {
+                lastLaunch = now
+                Launcher.open(this, prefs.link, target)
+            }
+            return
+        }
+
+        // Only relaunch after the game has actually been opened once
+        if (!sawTargetOpen) return
+
         if (goneSince == 0L) goneSince = now
-        val waited = now - goneSince >= prefs.delaySec * 1000L
-        val cooled = now - lastLaunch >= COOLDOWN_MS
-        if (waited && cooled) {
+        if (now - goneSince >= prefs.delaySec * 1000L) {
             lastLaunch = now
             goneSince = 0L
+            sawTargetOpen = false
+            waitingForRelaunch = true
             Launcher.open(this, prefs.link, target)
         }
     }
@@ -118,10 +133,17 @@ class WatchdogService : Service() {
         while (events.hasNextEvent()) {
             events.getNextEvent(e)
             when (e.eventType) {
-                UsageEvents.Event.ACTIVITY_RESUMED -> currentForeground = e.packageName
-                UsageEvents.Event.ACTIVITY_PAUSED,
-                UsageEvents.Event.ACTIVITY_STOPPED ->
-                    if (e.packageName == currentForeground) currentForeground = null
+                UsageEvents.Event.ACTIVITY_RESUMED -> {
+                    currentForeground = e.packageName
+                    currentClass = e.className
+                }
+                // Only clear if the exact screen that was showing got paused,
+                // so switching between screens inside the same app isn't seen as closing
+                UsageEvents.Event.ACTIVITY_PAUSED ->
+                    if (e.packageName == currentForeground && e.className == currentClass) {
+                        currentForeground = null
+                        currentClass = null
+                    }
             }
             lastEventTime = e.timeStamp + 1
         }
