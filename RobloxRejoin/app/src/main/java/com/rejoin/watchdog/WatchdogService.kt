@@ -48,7 +48,7 @@ class WatchdogService : Service() {
 
     private val tick = object : Runnable {
         override fun run() {
-            try { check() } catch (_: Exception) {}
+            try { check() } catch (e: Exception) { }
             handler.postDelayed(this, CHECK_MS)
         }
     }
