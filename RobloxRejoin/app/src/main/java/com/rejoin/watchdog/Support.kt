@@ -20,6 +20,18 @@ class Prefs(ctx: Context) {
     var delaySec: Int
         get() = sp.getInt("delay", 5)
         set(v) = sp.edit().putInt("delay", v).apply()
+
+    var heartbeatPath: String
+        get() = sp.getString("hb", DEFAULT_HB) ?: DEFAULT_HB
+        set(v) = sp.edit().putString("hb", v).apply()
+
+    var staleSec: Int
+        get() = sp.getInt("stale", 120)
+        set(v) = sp.edit().putInt("stale", v).apply()
+
+    companion object {
+        const val DEFAULT_HB = "/storage/emulated/0/Delta/Workspace/rejoin_heartbeat.txt"
+    }
 }
 
 object Launcher {

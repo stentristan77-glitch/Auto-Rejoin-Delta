@@ -25,6 +25,8 @@ class MainActivity : Activity() {
     private lateinit var linkInput: EditText
     private lateinit var pkgInput: EditText
     private lateinit var delayInput: EditText
+    private lateinit var heartbeatInput: EditText
+    private lateinit var staleInput: EditText
     private lateinit var status: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -66,6 +68,18 @@ class MainActivity : Activity() {
             inputType = InputType.TYPE_CLASS_NUMBER
         }.also { root.addView(it, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)) }
 
+        label("Heartbeat file (leave empty to turn off stuck detection)")
+        heartbeatInput = EditText(this).apply {
+            setText(prefs.heartbeatPath)
+            setSingleLine()
+        }.also { root.addView(it, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)) }
+
+        label("Rejoin if no heartbeat for this many seconds")
+        staleInput = EditText(this).apply {
+            setText(prefs.staleSec.toString())
+            inputType = InputType.TYPE_CLASS_NUMBER
+        }.also { root.addView(it, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)) }
+
         fun button(text: String, onClick: () -> Unit) = Button(this).apply {
             this.text = text
             setOnClickListener { onClick() }
@@ -79,6 +93,22 @@ class MainActivity : Activity() {
             startActivity(
                 Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
             )
+        }
+        button("Allow file access (for heartbeat)") {
+            if (Build.VERSION.SDK_INT >= 30) {
+                try {
+                    startActivity(
+                        Intent(
+                            Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                            Uri.parse("package:$packageName")
+                        )
+                    )
+                } catch (e: Exception) {
+                    startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                }
+            } else {
+                requestPermissions(arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE), 2)
+            }
         }
         button("Turn off battery optimisation") {
             startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
@@ -114,6 +144,8 @@ class MainActivity : Activity() {
         prefs.link = linkInput.text.toString().trim()
         prefs.pkg = pkgInput.text.toString().trim().ifEmpty { "com.roblox.client" }
         prefs.delaySec = delayInput.text.toString().toIntOrNull()?.coerceIn(2, 600) ?: 5
+        prefs.heartbeatPath = heartbeatInput.text.toString().trim()
+        prefs.staleSec = staleInput.text.toString().toIntOrNull()?.coerceIn(30, 1800) ?: 120
     }
 
     private fun start(prefs: Prefs) {
@@ -135,7 +167,20 @@ class MainActivity : Activity() {
         val usage = if (hasUsageAccess()) "OK" else "MISSING"
         val overlay = if (Settings.canDrawOverlays(this)) "OK" else "MISSING"
         val running = if (WatchdogService.running) "RUNNING" else "stopped"
-        status.text = "Usage access: $usage\nDisplay over apps: $overlay\nWatcher: $running"
+        status.text = "Usage access: $usage\nDisplay over apps: $overlay\n" +
+            "Heartbeat: ${heartbeatStatus()}\nWatcher: $running"
+    }
+
+    private fun heartbeatStatus(): String {
+        val path = heartbeatInput.text.toString().trim()
+        if (path.isEmpty()) return "off"
+        val f = java.io.File(path)
+        val t = f.lastModified()
+        return when {
+            t == 0L && !f.exists() -> "file not found yet (join a server with the script, then reopen this app)"
+            t == 0L -> "can't read file - allow file access"
+            else -> "last beat ${(System.currentTimeMillis() - t) / 1000}s ago"
+        }
     }
 
     private fun hasUsageAccess(): Boolean {
