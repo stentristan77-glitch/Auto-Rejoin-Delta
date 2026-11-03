@@ -121,7 +121,10 @@ class MainActivity : Activity() {
         }
         button("START watching") { start(prefs) }
         button("STOP watching") {
+            prefs.watching = false
+            Keepalive.cancel(this)
             stopService(Intent(this, WatchdogService::class.java))
+            toast("Stopped")
             refresh()
         }
 
@@ -155,6 +158,7 @@ class MainActivity : Activity() {
             !hasUsageAccess() -> toast("Allow usage access first")
             !Settings.canDrawOverlays(this) -> toast("Allow display over other apps first")
             else -> {
+                prefs.watching = true
                 val i = Intent(this, WatchdogService::class.java)
                 if (Build.VERSION.SDK_INT >= 26) startForegroundService(i) else startService(i)
                 toast("Watching ${prefs.pkg}")
@@ -166,7 +170,7 @@ class MainActivity : Activity() {
     private fun refresh() {
         val usage = if (hasUsageAccess()) "OK" else "MISSING"
         val overlay = if (Settings.canDrawOverlays(this)) "OK" else "MISSING"
-        val running = if (WatchdogService.running) "RUNNING" else "stopped"
+        val running = if (Prefs(this).watching) "RUNNING" else "stopped"
         status.text = "Usage access: $usage\nDisplay over apps: $overlay\n" +
             "Heartbeat: ${heartbeatStatus()}\nWatcher: $running"
     }

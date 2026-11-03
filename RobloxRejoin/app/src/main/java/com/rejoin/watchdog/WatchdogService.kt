@@ -57,13 +57,20 @@ class WatchdogService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            Prefs(this).watching = false
+            Keepalive.cancel(this)
             stopSelf()
             return START_NOT_STICKY
         }
         prefs = Prefs(this)
         startInForeground()
+        prefs.watching = true
+        Keepalive.schedule(this)
         if (!running) {
             running = true
+            // Treat the game as "was open", so after a crash/restart of everything
+            // the watcher reopens the server instead of waiting for you
+            sawTargetOpen = true
             lastEventTime = System.currentTimeMillis() - 60 * 60 * 1000
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "rejoin:watch").apply {
