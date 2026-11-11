@@ -1,4 +1,4 @@
--- Glitter Extend v4.1 (with window)
+-- Glitter Extend v4.4 (hide button)
 -- Detects Pine Tree / Blue Flower / Bamboo field boosts, waits 14 min, then uses Glitter
 -- in that field. Shows timers + Blue Booster cooldown in a small window. Put in Delta -> Autoexecute.
 
@@ -8,11 +8,11 @@ local FIELDS = {                       -- [word to look for] = exact field name 
     { word = "blue flower", name = "Blue Flower Field" },
     { word = "bamboo",      name = "Bamboo Field" },
 }
-local GLITTER_AFTER_MIN   = 14  -- use Glitter this many minutes after the boost starts
+local GLITTER_AFTER_MIN   = 13  -- start trying to use Glitter this many minutes after the boost starts
 local BOOST_MIN           = 15  -- how long a field boost lasts (for the "boost left" timer)
 local BLUE_BOOSTER_CD_MIN = 45  -- Blue Field Booster cooldown
-local WAIT_WINDOW_SEC     = 60  -- if you're not in the field at 14:00, keep trying for this long
-local KEEP_EXTENDING      = true
+local WAIT_WINDOW_SEC     = 110 -- keep trying for this long (13:00 -> ~14:50, before the boost ends)
+local KEEP_EXTENDING      = false -- Glitter only extends a boost once, so one Glitter per boost
 local DEBUG_LOG           = true -- saves every "boost" text it sees to glitter_debug.txt
 ----------------------------------------------------------------------
 
@@ -95,7 +95,7 @@ local function label(parent, text, size, color, y, h)
 end
 
 local win = Instance.new("Frame")
-win.Size = UDim2.new(0, 290, 0, 268)
+win.Size = UDim2.new(0, 290, 0, 292)
 win.Position = UDim2.new(1, -310, 0, 120)
 win.BackgroundColor3 = DARK
 win.BorderSizePixel = 0
@@ -159,7 +159,7 @@ end)
 
 -- Info panel
 local panel = Instance.new("Frame")
-panel.Size = UDim2.new(1, -16, 0, 166)
+panel.Size = UDim2.new(1, -16, 0, 190)
 panel.Position = UDim2.new(0, 8, 0, 52)
 panel.BackgroundColor3 = PANEL
 panel.BorderSizePixel = 0
@@ -172,15 +172,74 @@ for i, f in ipairs(FIELDS) do
     label(panel, f.name, 13, DIM, 34 + (i - 1) * 38, 16)
     fieldLabels[f.name] = label(panel, "", 14, TEXT, 50 + (i - 1) * 38, 18)
 end
-local statusLabel = label(body, "", 12, DIM, 222, 16)
+local whereLabel = label(panel, "", 13, TEXT, 164, 18)
+local statusLabel = label(body, "", 12, DIM, 246, 16)
 statusLabel.TextTruncate = Enum.TextTruncate.AtEnd
+
+-- Hide button in the title bar
+local hideBtn = Instance.new("TextButton")
+hideBtn.Size = UDim2.new(0, 34, 0, 30)
+hideBtn.Position = UDim2.new(1, -76, 0, 4)
+hideBtn.BackgroundTransparency = 1
+hideBtn.Text = "✕"
+hideBtn.TextColor3 = TEXT
+hideBtn.TextSize = 17
+hideBtn.Font = Enum.Font.GothamBold
+hideBtn.Parent = header
+
+-- Floating round button to show/hide the window (like Atlas). You can drag it around.
+local floatBtn = Instance.new("TextButton")
+floatBtn.Size = UDim2.new(0, 50, 0, 50)
+floatBtn.Position = UDim2.new(0, 20, 0.5, -25)
+floatBtn.BackgroundColor3 = NAVY
+floatBtn.BorderSizePixel = 0
+floatBtn.Text = "✨"
+floatBtn.TextSize = 24
+floatBtn.Font = Enum.Font.GothamBold
+floatBtn.TextColor3 = TEXT
+floatBtn.AutoButtonColor = true
+floatBtn.Parent = screen
+corner(floatBtn, 25)
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(90, 140, 220)
+stroke.Thickness = 2
+stroke.Parent = floatBtn
+
+local function setShown(show)
+    win.Visible = show
+end
+hideBtn.MouseButton1Click:Connect(function() setShown(false) end)
+
+do
+    local pressing, moved, startPos, startInput = false, false, nil, nil
+    floatBtn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            pressing, moved, startPos, startInput = true, false, floatBtn.Position, input.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End and pressing then
+                    pressing = false
+                    if not moved then setShown(not win.Visible) end -- a tap toggles, a drag just moves it
+                end
+            end)
+        end
+    end)
+    UIS.InputChanged:Connect(function(input)
+        if pressing and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local d = input.Position - startInput
+            if d.Magnitude > 8 then moved = true end
+            if moved then
+                floatBtn.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+            end
+        end
+    end)
+end
 
 -- Minimise / drag
 local minimized = false
 minBtn.MouseButton1Click:Connect(function()
     minimized = not minimized
     body.Visible = not minimized
-    win.Size = minimized and UDim2.new(0, 290, 0, 38) or UDim2.new(0, 290, 0, 268)
+    win.Size = minimized and UDim2.new(0, 290, 0, 38) or UDim2.new(0, 290, 0, 292)
     minBtn.Text = minimized and "▲" or "▼"
 end)
 
@@ -219,10 +278,20 @@ local function inField(fieldName)
     return math.abs(rel.X) <= half.X and math.abs(rel.Z) <= half.Z and math.abs(rel.Y) <= 40
 end
 
+local function currentField()
+    if not zones then return nil end
+    for _, zone in ipairs(zones:GetChildren()) do
+        if zone:IsA("BasePart") and inField(zone.Name) then return zone.Name end
+    end
+    return nil
+end
+
 ------------------------------ TIMERS ------------------------------
 local boostStart = {}  -- fieldName -> when the current boost started (or was last extended)
 local glitterAt = {}   -- fieldName -> when Glitter is due
 local lastSeen = {}    -- fieldName -> last time a boost text for it was seen
+local extended = {}    -- fieldName -> true once this boost got its Glitter
+local inFieldFor = {}  -- fieldName -> how many checks in a row you've been inside it
 local boosterReadyAt = nil
 local lastLog = 0
 
@@ -232,6 +301,7 @@ local function onBoost(fieldName, source)
     lastSeen[fieldName] = now
     if prev and now - prev < 60 then return end -- same boost still showing, not a new one
     boostStart[fieldName] = now
+    extended[fieldName] = nil
     glitterAt[fieldName] = now + GLITTER_AFTER_MIN * 60
     boosterReadyAt = now + BLUE_BOOSTER_CD_MIN * 60 -- a blue field got boosted = Blue Booster was used
     status = "Boost detected: " .. fieldName
@@ -295,14 +365,16 @@ task.spawn(function()
         if enabled and useItem then
             for _, f in ipairs(FIELDS) do
                 local name, dueAt = f.name, glitterAt[f.name]
+                inFieldFor[name] = inField(name) and ((inFieldFor[name] or 0) + 1) or 0
                 if dueAt and now >= dueAt then
-                    if inField(name) then
+                    if inFieldFor[name] >= 3 then -- inside the field for ~3 seconds, not just walking through
                         local ok = pcall(function() useItem:FireServer({ ["Name"] = "Glitter" }) end)
                         status = ok and ("Used Glitter in " .. name) or "Failed to use Glitter"
                         popup(status)
                         log("GLITTER USED in " .. name .. " ok=" .. tostring(ok))
                         lastSeen[name] = os.clock()
                         boostStart[name] = os.clock()
+                        extended[name] = true
                         glitterAt[name] = KEEP_EXTENDING and (os.clock() + GLITTER_AFTER_MIN * 60) or nil
                     elseif now >= dueAt + WAIT_WINDOW_SEC then
                         status = "Missed Glitter: not in " .. name
@@ -328,16 +400,19 @@ task.spawn(function()
             local left = started and (started + BOOST_MIN * 60 - now) or 0
             if started and left > 0 then
                 local g = glitterAt[name]
-                local gtext = g and ("  |  Glitter in " .. fmt(g - now)) or ""
+                local gtext = g and ("  |  Glitter in " .. fmt(g - now)) or (extended[name] and "  |  Extended" or "")
                 if not enabled and g then gtext = "  |  Glitter OFF" end
                 fieldLabels[name].Text = "Boost " .. fmt(left) .. gtext
                 fieldLabels[name].TextColor3 = GREEN
             else
                 fieldLabels[name].Text = "No boost"
                 fieldLabels[name].TextColor3 = DIM
-                if started then boostStart[name] = nil end
+                if started then boostStart[name] = nil; extended[name] = nil end
             end
         end
+        local here = currentField()
+        whereLabel.Text = "You're in: " .. (here or "not in a field")
+        whereLabel.TextColor3 = here and TEXT or DIM
         statusLabel.Text = status
 
         task.wait(1)
