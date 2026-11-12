@@ -83,8 +83,8 @@ object Keepalive {
         am.cancel(pi(ctx))
     }
 
-    fun startService(ctx: Context) {
-        val i = Intent(ctx, WatchdogService::class.java)
+    fun startService(ctx: Context, fromBoot: Boolean = false) {
+        val i = Intent(ctx, WatchdogService::class.java).putExtra(WatchdogService.EXTRA_BOOT, fromBoot)
         try {
             if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
         } catch (e: Exception) { }
@@ -96,7 +96,9 @@ class KeepaliveReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent?) {
         val prefs = Prefs(ctx)
         if (!prefs.watching) return
-        if (!WatchdogService.running) Keepalive.startService(ctx)
+        val action = intent?.action ?: ""
+        val isBoot = action.endsWith("BOOT_COMPLETED") || action.endsWith("QUICKBOOT_POWERON")
+        if (isBoot || !WatchdogService.running) Keepalive.startService(ctx, fromBoot = isBoot)
         Keepalive.schedule(ctx)
     }
 }

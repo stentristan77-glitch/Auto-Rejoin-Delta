@@ -29,6 +29,7 @@ class WatchdogService : Service() {
         @Volatile var running = false
         private const val CHANNEL = "watchdog"
         private const val ACTION_STOP = "stop"
+        const val EXTRA_BOOT = "from_boot"
         private const val CHECK_MS = 2000L
         private const val RETRY_MS = 90_000L // if the game didn't come back, try the link again after this
     }
@@ -71,13 +72,26 @@ class WatchdogService : Service() {
             // Treat the game as "was open", so after a crash/restart of everything
             // the watcher reopens the server instead of waiting for you
             sawTargetOpen = true
-            lastEventTime = System.currentTimeMillis() - 60 * 60 * 1000
+            // Only look at app events since the phone last started (older ones are stale after a restart)
+            val bootAt = System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime()
+            lastEventTime = maxOf(System.currentTimeMillis() - 60 * 60 * 1000, bootAt)
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "rejoin:watch").apply {
                 setReferenceCounted(false)
                 acquire()
             }
             handler.post(tick)
+        }
+        // Phone just restarted: Roblox isn't open at all, so open the server once things have settled
+        if (intent?.getBooleanExtra(EXTRA_BOOT, false) == true) {
+            handler.postDelayed({
+                if (prefs.watching && currentForeground != prefs.pkg) {
+                    lastLaunch = System.currentTimeMillis()
+                    sawTargetOpen = false
+                    waitingForRelaunch = true
+                    Launcher.open(this, prefs.link, prefs.pkg)
+                }
+            }, 30_000L)
         }
         return START_STICKY
     }
@@ -110,10 +124,6 @@ class WatchdogService : Service() {
 
         // Don't fight the user while they're in this app (e.g. to press Stop)
         if (fg == packageName) { goneSince = 0L; return }
-
-        // Skip while the screen is off
-        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        if (!pm.isInteractive) return
 
         // Already reopened once: only retry if the game still hasn't come back after a while
         if (waitingForRelaunch) {
