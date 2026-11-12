@@ -1,4 +1,4 @@
--- Glitter Extend v4.4 (hide button)
+-- Glitter Extend v5 (light: chat-only detection)
 -- Detects Pine Tree / Blue Flower / Bamboo field boosts, waits 14 min, then uses Glitter
 -- in that field. Shows timers + Blue Booster cooldown in a small window. Put in Delta -> Autoexecute.
 
@@ -43,14 +43,16 @@ local function popup(text)
     end)
 end
 
+local logLines = 0
 local function log(text)
-    if not DEBUG_LOG then return end
+    if not DEBUG_LOG or logLines > 300 then return end -- max 300 lines so the file never gets huge
+    logLines = logLines + 1
     pcall(function()
         local line = os.date("%H:%M:%S") .. "  " .. text .. "\n"
-        if isfile and isfile("glitter_debug.txt") then
-            appendfile("glitter_debug.txt", line)
+        if logLines == 1 then
+            writefile("glitter_debug.txt", line) -- start a fresh file every time the script runs
         else
-            writefile("glitter_debug.txt", line)
+            appendfile("glitter_debug.txt", line)
         end
     end)
 end
@@ -304,17 +306,20 @@ local function onBoost(fieldName, source)
     extended[fieldName] = nil
     glitterAt[fieldName] = now + GLITTER_AFTER_MIN * 60
     boosterReadyAt = now + BLUE_BOOSTER_CD_MIN * 60 -- a blue field got boosted = Blue Booster was used
-    status = "Boost detected: " .. fieldName
+    status = "Boost detected: " .. fieldName .. " (" .. source .. ")"
     popup("Boost detected: " .. fieldName)
     log("BOOST DETECTED -> " .. fieldName .. " (from " .. source .. ")")
 end
 
 ------------------------------ DETECTION ------------------------------
+-- Boosts show up in chat as messages like [Activated "Pine Tree Forest Boost" x1].
+-- Only chat is watched now - watching every text on screen was too heavy for the cloud phone.
 local function checkText(text, source)
     if type(text) ~= "string" or text == "" then return end
+    text = string.gsub(text, "<[^>]->", "") -- remove the colour/font tags
     local lower = string.lower(text)
     if not string.find(lower, "boost") then return end
-    if os.clock() - lastLog > 5 then
+    if os.clock() - lastLog > 2 then
         lastLog = os.clock()
         log("[" .. source .. "] " .. text)
     end
@@ -322,31 +327,6 @@ local function checkText(text, source)
         if string.find(lower, f.word, 1, true) then onBoost(f.name, source) end
     end
 end
-
-local gui = plr:WaitForChild("PlayerGui")
-local function isOurs(obj) return obj:IsDescendantOf(screen) end
-
-gui.DescendantAdded:Connect(function(obj)
-    if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and not isOurs(obj) then
-        task.delay(0.5, function()
-            if obj.Parent then checkText(obj.Text, "screen") end
-        end)
-    end
-end)
-
-task.spawn(function()
-    while true do
-        task.wait(20)
-        local count = 0
-        for _, obj in ipairs(gui:GetDescendants()) do
-            if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and obj.Visible and not isOurs(obj) then
-                checkText(obj.Text, "screen")
-            end
-            count = count + 1
-            if count % 500 == 0 then task.wait() end
-        end
-    end
-end)
 
 pcall(function()
     TextChatService.MessageReceived:Connect(function(msg) checkText(msg.Text, "chat") end)
