@@ -1,14 +1,16 @@
 -- Glitter Extend MINI (no window, no log - as light as possible)
 -- Listens to chat for Pine Tree / Blue Flower / Bamboo boosts,
--- then uses ONE Glitter in that field 13 minutes later (only while you're standing in it).
+-- then uses ONE Glitter in that field 12-14 minutes later (only while you're standing in it).
 
 local FIELDS = {
     { word = "pine tree",   name = "Pine Tree Forest" },
     { word = "blue flower", name = "Blue Flower Field" },
     { word = "bamboo",      name = "Bamboo Field" },
 }
-local GLITTER_AFTER = 13 * 60  -- seconds after the boost to start trying
-local GIVE_UP_AFTER = 110      -- keep trying this long (until ~14:50)
+local GLITTER_AFTER = 14 * 60  -- from 14:00, use it as soon as you're in the field
+local EARLY_AFTER   = 12 * 60  -- 12:00-14:00: use it early if your bag is almost full
+local BAG_FULL      = 0.9      -- "almost full" = 90% (Atlas is about to go convert)
+local GIVE_UP_AFTER = 50       -- keep trying this long after 14:00 (until ~14:50)
 
 if not game:IsLoaded() then game.Loaded:Wait() end
 if _G.GlitterMini then return end -- don't run twice
@@ -37,6 +39,15 @@ end
 
 local due, lastSeen, inside = {}, {}, {}
 
+-- Bag fullness (pollen / capacity). If the game doesn't have these, the early use is just skipped.
+local stats = plr:FindFirstChild("CoreStats") or plr:WaitForChild("CoreStats", 30)
+local function bagFull()
+    local p = stats and stats:FindFirstChild("Pollen")
+    local c = stats and stats:FindFirstChild("Capacity")
+    if not (p and c) or c.Value <= 0 then return false end
+    return p.Value / c.Value >= BAG_FULL
+end
+
 game:GetService("TextChatService").MessageReceived:Connect(function(msg)
     local text = string.lower(msg.Text or "")
     if not string.find(text, "boost", 1, true) then return end
@@ -47,7 +58,7 @@ game:GetService("TextChatService").MessageReceived:Connect(function(msg)
             lastSeen[f.name] = now
             if not prev or now - prev > 60 then
                 due[f.name] = now + GLITTER_AFTER
-                popup(f.name .. " boosted - Glitter in 13 min")
+                popup(f.name .. " boosted - Glitter at 12-14 min")
             end
         end
     end
@@ -60,8 +71,17 @@ while true do
     task.wait(3)
     local now = os.clock()
     for name, t in pairs(due) do
-        if now >= t then
+        local early = now >= t - (GLITTER_AFTER - EARLY_AFTER) -- 12:00 or later
+        if early then
             inside[name] = inField(name) and ((inside[name] or 0) + 1) or 0
+        end
+        if early and now < t and inside[name] >= 1 and bagFull() then
+            -- Bag almost full: Atlas is about to leave to convert, so use it now
+            pcall(function() useItem:FireServer({ ["Name"] = "Glitter" }) end)
+            lastSeen[name] = os.clock()
+            due[name] = nil
+            popup("Used Glitter in " .. name .. " (early, bag full)")
+        elseif now >= t then
             if inside[name] >= 2 then -- in the field for 2 checks in a row (~3-6 sec)
                 pcall(function() useItem:FireServer({ ["Name"] = "Glitter" }) end)
                 lastSeen[name] = os.clock()
