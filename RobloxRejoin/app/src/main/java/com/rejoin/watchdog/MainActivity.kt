@@ -27,6 +27,8 @@ class MainActivity : Activity() {
     private lateinit var delayInput: EditText
     private lateinit var heartbeatInput: EditText
     private lateinit var staleInput: EditText
+    private lateinit var webhookInput: EditText
+    private lateinit var discordIdInput: EditText
     private lateinit var status: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -115,6 +117,29 @@ class MainActivity : Activity() {
         }
 
         label("Step 2 - run")
+        label("Discord webhook URL (optional)")
+        webhookInput = EditText(this).apply {
+            setText(prefs.webhook)
+            hint = "https://discord.com/api/webhooks/..."
+            setSingleLine()
+        }.also { root.addView(it, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)) }
+
+        label("Your Discord user ID, to get pinged (optional)")
+        discordIdInput = EditText(this).apply {
+            setText(prefs.discordId)
+            hint = "123456789012345678"
+            inputType = InputType.TYPE_CLASS_NUMBER
+        }.also { root.addView(it, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)) }
+
+        button("Send test Discord message") {
+            save(prefs)
+            if (!prefs.webhook.trim().startsWith("https://")) toast("Paste your webhook URL first")
+            else {
+                Discord.send(this, "👋 Test from Roblox Rejoin - pings work!", force = true)
+                toast("Sent - check Discord")
+            }
+        }
+
         button("Test link now") {
             save(prefs)
             Launcher.open(this, prefs.link, prefs.pkg)
@@ -149,6 +174,8 @@ class MainActivity : Activity() {
         prefs.delaySec = delayInput.text.toString().toIntOrNull()?.coerceIn(2, 600) ?: 5
         prefs.heartbeatPath = heartbeatInput.text.toString().trim()
         prefs.staleSec = staleInput.text.toString().toIntOrNull()?.coerceIn(30, 1800) ?: 120
+        prefs.webhook = webhookInput.text.toString().trim()
+        prefs.discordId = discordIdInput.text.toString().trim()
     }
 
     private fun start(prefs: Prefs) {

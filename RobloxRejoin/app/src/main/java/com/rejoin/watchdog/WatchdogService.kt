@@ -40,6 +40,9 @@ class WatchdogService : Service() {
 
     private var sawTargetOpen = false
     private var waitingForRelaunch = false
+    private var noBeatRejoins = 0
+    private var beatAtLastRejoin = 0L
+    private var keyWarned = false
     private var goneSince = 0L
     private var targetSince = 0L
     private var lastLaunch = 0L
@@ -89,6 +92,7 @@ class WatchdogService : Service() {
                     lastLaunch = System.currentTimeMillis()
                     sawTargetOpen = false
                     waitingForRelaunch = true
+                    Discord.send(this, "🔄 Cloud phone restarted - reopening your private server")
                     Launcher.open(this, prefs.link, prefs.pkg)
                 }
             }, 30_000L)
@@ -129,6 +133,7 @@ class WatchdogService : Service() {
         if (waitingForRelaunch) {
             if (now - lastLaunch >= RETRY_MS) {
                 lastLaunch = now
+                Discord.send(this, "⚠️ Roblox still isn't back - trying the link again")
                 Launcher.open(this, prefs.link, target)
             }
             return
@@ -143,6 +148,7 @@ class WatchdogService : Service() {
             goneSince = 0L
             sawTargetOpen = false
             waitingForRelaunch = true
+            Discord.send(this, "💥 Roblox closed/crashed - rejoining your private server")
             Launcher.open(this, prefs.link, target)
         }
     }
@@ -157,9 +163,26 @@ class WatchdogService : Service() {
         val beat = File(path).lastModified()
         // File missing or unreadable: never act, so a wrong path can't cause spam
         if (beat == 0L) return
+
+        // Heartbeat came back after problems -> all good again
+        if (beat > beatAtLastRejoin && noBeatRejoins > 0) {
+            if (keyWarned) Discord.send(this, "✅ Heartbeat is back - farming again")
+            noBeatRejoins = 0
+            keyWarned = false
+        }
+
         val lastSignOfLife = maxOf(beat, targetSince, lastLaunch)
         if (now - lastSignOfLife >= prefs.staleSec * 1000L) {
             lastLaunch = now
+            // Count rejoins in a row where the heartbeat never came back in between
+            noBeatRejoins = if (beat <= beatAtLastRejoin) noBeatRejoins + 1 else 1
+            beatAtLastRejoin = beat
+            if (noBeatRejoins >= 3 && !keyWarned) {
+                keyWarned = true
+                Discord.send(this, "🔑 Scripts aren't running even after rejoining - your Delta key has probably expired!")
+            } else if (!keyWarned) {
+                Discord.send(this, "📡 Heartbeat stopped (disconnected / stuck) - rejoining")
+            }
             Launcher.open(this, prefs.link, target)
         }
     }

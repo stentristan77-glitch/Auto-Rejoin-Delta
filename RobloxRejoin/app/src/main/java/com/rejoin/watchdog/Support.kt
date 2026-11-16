@@ -30,6 +30,14 @@ class Prefs(ctx: Context) {
         get() = sp.getString("hb", DEFAULT_HB) ?: DEFAULT_HB
         set(v) = sp.edit().putString("hb", v).apply()
 
+    var webhook: String
+        get() = sp.getString("webhook", "") ?: ""
+        set(v) = sp.edit().putString("webhook", v).apply()
+
+    var discordId: String
+        get() = sp.getString("discordId", "") ?: ""
+        set(v) = sp.edit().putString("discordId", v).apply()
+
     var staleSec: Int
         get() = sp.getInt("stale", 120)
         set(v) = sp.edit().putInt("stale", v).apply()
@@ -41,6 +49,39 @@ class Prefs(ctx: Context) {
 
     companion object {
         const val DEFAULT_HB = "/storage/emulated/0/Delta/Workspace/rejoin_heartbeat.txt"
+    }
+}
+
+/** Sends a message to your Discord webhook (in the background, never blocks the app). */
+object Discord {
+    private var lastText = ""
+    private var lastTime = 0L
+
+    fun send(ctx: Context, text: String, force: Boolean = false) {
+        val prefs = Prefs(ctx)
+        val url = prefs.webhook.trim()
+        if (!url.startsWith("https://")) return
+        val now = System.currentTimeMillis()
+        // Don't send the same message more than once a minute
+        if (!force && text == lastText && now - lastTime < 60_000L) return
+        lastText = text
+        lastTime = now
+        val id = prefs.discordId.trim()
+        val content = (if (id.isNotEmpty()) "<@$id> " else "") + text
+        Thread {
+            try {
+                val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.connectTimeout = 10_000
+                conn.readTimeout = 10_000
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", "application/json")
+                val body = org.json.JSONObject().put("content", content).toString()
+                conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                conn.responseCode
+                conn.disconnect()
+            } catch (e: Exception) { }
+        }.start()
     }
 }
 
